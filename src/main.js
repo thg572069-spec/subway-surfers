@@ -6,9 +6,6 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 // CONFIG – tweak the feel of the game here
 // =====================================================================
 const CONFIG = {
-  // Drop a rigged/animated GLB (e.g. from Meshy or Tripo) at this path to replace
-  // the built-in runner. Clips whose names contain "run"/"walk", "jump" and
-  // "roll"/"slide" are picked up automatically. Set to '' to always use the built-in runner.
   playerModel: 'assets/player.glb',
   playerModelHeight: 1.8,
   playerModelRotationY: Math.PI,
@@ -81,8 +78,6 @@ scene.background = new THREE.Color(SKY);
 scene.fog = new THREE.Fog(SKY, 55, 170);
 
 const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 400);
-
-// Aproximação leve da câmera
 camera.position.set(0, 4.3, 7.2);
 
 scene.add(new THREE.HemisphereLight(0xffffff, 0x8a7a66, 1.7));
@@ -215,7 +210,7 @@ function box(mat, sx, sy, sz, x = 0, y = 0, z = 0, shadow = true) {
 }
 
 // =====================================================================
-// World tiles (ground, rails, walls, buildings) – recycled endlessly
+// World tiles – pista procedural original
 // =====================================================================
 const SLEEPERS_PER_LANE = 20;
 const sleeperGeo = new THREE.BoxGeometry(1.9, 0.1, 0.35);
@@ -253,7 +248,6 @@ function makeTile() {
     g.add(box(MAT.wallTop, 0.7, 0.15, TILE_LEN, s * wallX, 1.45, 0));
   }
 
-  // Postes decorativos nas laterais do cenário
   for (const side of [-1, 1]) {
     for (const z of [-12, 12]) {
       const lamp = new THREE.Group();
@@ -309,6 +303,94 @@ function randomizeBuildings(tile) {
 }
 
 for (let i = 0; i < NUM_TILES; i++) tiles.push(makeTile());
+
+// =====================================================================
+// MAPA GLB – LOOP CONTÍNUO
+// =====================================================================
+const MAP_PATH = 'assets/mapa/mapa.glb';
+const MAP_SEGMENTS_COUNT = 3;
+const mapSegments = [];
+let mapLength = 0;
+let mapLoaded = false;
+
+function updateMapLoop() {
+  if (!mapLoaded || mapLength <= 0) return;
+
+  for (const segment of mapSegments) {
+    if (segment.position.z - mapLength / 2 > G.pz + 8) {
+      const furthestBack = Math.min(
+        ...mapSegments.map((item) => item.position.z)
+      );
+
+      segment.position.z = furthestBack - mapLength;
+    }
+  }
+}
+
+function resetMapLoop() {
+  if (!mapLoaded) return;
+
+  mapSegments.forEach((segment, index) => {
+    segment.position.z = G.pz - index * mapLength;
+  });
+}
+
+new GLTFLoader().load(
+  MAP_PATH,
+  (gltf) => {
+    const source = gltf.scene;
+
+    source.traverse((obj) => {
+      if (obj.isMesh) {
+        obj.castShadow = true;
+        obj.receiveShadow = true;
+      }
+    });
+
+    // Detecta o eixo horizontal mais comprido do modelo.
+    const initialBounds = new THREE.Box3().setFromObject(source);
+    const initialSize = initialBounds.getSize(new THREE.Vector3());
+
+    // O jogo avança pelo eixo Z.
+    if (initialSize.x > initialSize.z) {
+      source.rotation.y = Math.PI / 2;
+    }
+
+    const bounds = new THREE.Box3().setFromObject(source);
+    const size = bounds.getSize(new THREE.Vector3());
+    const center = bounds.getCenter(new THREE.Vector3());
+
+    mapLength = size.z;
+
+    if (!Number.isFinite(mapLength) || mapLength < 1) {
+      mapLength = 0;
+      console.error('[mapa] Comprimento inválido no GLB.');
+      return;
+    }
+
+    for (let i = 0; i < MAP_SEGMENTS_COUNT; i++) {
+      const segment = new THREE.Group();
+      const model = source.clone(true);
+
+      model.position.set(-center.x, -bounds.min.y, -center.z);
+      segment.add(model);
+
+      segment.position.set(0, 0, G.pz - i * mapLength);
+      scene.add(segment);
+      mapSegments.push(segment);
+    }
+
+    mapLoaded = true;
+
+    console.info(
+      `[mapa] Loop carregado. Comprimento: ${mapLength.toFixed(2)}`
+    );
+  },
+  undefined,
+  (error) => {
+    console.error(`[mapa] Erro ao carregar ${MAP_PATH}:`, error);
+  }
+);
 
 // =====================================================================
 // Obstacles: trains, ramps, barriers
@@ -601,6 +683,8 @@ function resetGame() {
     crashTimer: 0, shake: 0, phase: 0, coins: 0, score: 0, nextRowZ: -45,
     laneEnd: [Infinity, Infinity, Infinity],
   });
+
+  resetMapLoop();
 
   tiles.forEach((t, i) => {
     t.position.z = TILE_LEN - i * TILE_LEN;
@@ -1064,6 +1148,9 @@ function updatePlaying(dt) {
 function recycle() {
   const camZ = G.pz + 8;
 
+  // Atualiza o loop do mapa GLB.
+  updateMapLoop();
+
   for (const t of tiles) {
     if (t.position.z - TILE_LEN / 2 > camZ) {
       t.position.z -= NUM_TILES * TILE_LEN;
@@ -1161,7 +1248,6 @@ function updateCamera(dt, t) {
   camera.position.x += (tx - camera.position.x) * damp(8, dt);
   camera.position.y += (ty - camera.position.y) * damp(6, dt);
 
-  // Aproximação leve da câmera durante a partida
   camera.position.z = G.pz + 7.2;
 
   if (G.shake > 0) {
