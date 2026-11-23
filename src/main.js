@@ -1,3 +1,4 @@
+
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
@@ -12,11 +13,11 @@ const CONFIG = {
 
   // Mapa 3D
   mapModel: 'assets/mapa/mapa.glb',
-  mapTrackWidth: 95.0, // Compensação da rua transversal (em T) e árvores laterais[span_1](start_span)[span_1](end_span)
+  mapTrackWidth: 95.0,
   mapRotationX: 0,
   mapRotationY: 0,
   mapGroundOffsetY: 0.0,
-  mapSegmentOverlap: 0.88, // Sobrepõe levemente os trechos para esconder o cruzamento[span_2](start_span)[span_2](end_span)
+  mapSegmentOverlap: 0.88,
 
   // Física e Jogabilidade
   laneWidth: 2.4,
@@ -60,8 +61,9 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(SKY);
 scene.fog = new THREE.Fog(SKY, 75, 210);
 
-const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 450);
-camera.position.set(0, 4.3, 7.2);
+// Câmera mais próxima e com campo de visão menor
+const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 450);
+camera.position.set(0, 4.0, 6.2);
 
 scene.add(new THREE.HemisphereLight(0xffffff, 0xb8aca0, 1.2));
 scene.add(new THREE.AmbientLight(0xffffff, 0.45));
@@ -656,17 +658,18 @@ function animateRunner(dt) {
 
 function updateCamera(dt) {
   const tx = G.px * 0.8;
-  const ty = 4.3 + G.py * 0.6;
+  const ty = 4.0 + G.py * 0.6;
 
   camera.position.x += (tx - camera.position.x) * damp(8, dt);
   camera.position.y += (ty - camera.position.y) * damp(6, dt);
-  camera.position.z = G.pz + 7.2;
+  camera.position.z = G.pz + 6.2;
 
   tmpLook.set(G.px * 0.85, 1.4 + G.py * 0.5, G.pz - 8);
   camera.lookAt(tmpLook);
 
-  const portraitBoost = camera.aspect < 1 ? (1 - camera.aspect) * 30 : 0;
-  const fov = 62 + portraitBoost + (G.speed - CONFIG.startSpeed) * 0.35;
+  // Reduz o zoom aberto excessivo nas telas verticais
+  const portraitBoost = camera.aspect < 1 ? (1 - camera.aspect) * 12 : 0;
+  const fov = 55 + portraitBoost + (G.speed - CONFIG.startSpeed) * 0.2;
 
   if (Math.abs(camera.fov - fov) > 0.05) {
     camera.fov = fov;
