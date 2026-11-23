@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 // =====================================================================
-// CONFIG – ajuste o alinhamento do personagem e do mapa aqui
+// CONFIG – ajuste fino da escala e rotação do mapa e da personagem
 // =====================================================================
 const CONFIG = {
   // Personagem 3D
@@ -10,12 +10,12 @@ const CONFIG = {
   playerModelHeight: 1.8,
   playerModelRotationY: Math.PI,
 
-  // Mapa 3D (Cenário único)
+  // Mapa 3D
   mapModel: 'assets/mapa/mapa.glb',
-  mapTrackWidth: 9.0,           // Largura das 3 pistas no cenário
-  mapRotationX: Math.PI,        // Já deixa virado de cabeça para cima (mude para 0 se ficar invertido)
-  mapRotationY: 0,              // Mude para Math.PI / 2 se o mapa estiver atravessado
-  mapGroundOffsetY: 0,          // Ajuste fino da altura do chão (ex: -0.3 ou +0.2)
+  mapTrackWidth: 28.0,          // Largura total do modelo (aumentado para a rua ficar larga)
+  mapRotationX: 0,              // Lado certo (sem virar de cabeça para baixo)
+  mapRotationY: 0,              // Mude para Math.PI / 2 se o mapa estiver de lado
+  mapGroundOffsetY: 0,          // Ajuste fino se quiser subir/descer o mapa (+ ou -)
 
   // Física e Jogabilidade
   laneWidth: 2.4,
@@ -165,20 +165,37 @@ new GLTFLoader().load(
     rawModel.rotation.x = CONFIG.mapRotationX;
     rawModel.rotation.y = CONFIG.mapRotationY;
 
+    // Alinha o lado mais comprido do mapa com o eixo Z (direção da corrida)
     const preBounds = new THREE.Box3().setFromObject(wrapper);
     const preSize = preBounds.getSize(new THREE.Vector3());
     if (CONFIG.mapRotationY === 0 && preSize.x > preSize.z) {
       rawModel.rotation.y = Math.PI / 2;
     }
 
+    // Escala proporcional
     const scaledBounds = new THREE.Box3().setFromObject(wrapper);
     const scaledSize = scaledBounds.getSize(new THREE.Vector3());
     const scaleFactor = CONFIG.mapTrackWidth / (scaledSize.x || 1);
     wrapper.scale.setScalar(scaleFactor);
 
+    // Centraliza em X e Z
     const finalBounds = new THREE.Box3().setFromObject(wrapper);
     const finalSize = finalBounds.getSize(new THREE.Vector3());
     const finalCenter = finalBounds.getCenter(new THREE.Vector3());
+
+    wrapper.position.set(-finalCenter.x, -finalBounds.min.y, -finalCenter.z);
+    wrapper.updateMatrixWorld(true);
+
+    // Detecta automaticamente a altura da superfície da rua no centro (X=0, Z=0)
+    const raycaster = new THREE.Raycaster(
+      new THREE.Vector3(0, finalSize.y + 10, 0),
+      new THREE.Vector3(0, -1, 0)
+    );
+    const hits = raycaster.intersectObject(wrapper, true);
+    const roadSurfaceY = hits.length > 0 ? hits[0].point.y : 0;
+
+    // Nivela o asfalto da pista exatamente em Y = 0
+    wrapper.position.y -= roadSurfaceY - CONFIG.mapGroundOffsetY;
 
     mapLength = finalSize.z;
 
@@ -190,13 +207,6 @@ new GLTFLoader().load(
     for (let i = 0; i < MAP_SEGMENTS_COUNT; i++) {
       const segment = new THREE.Group();
       const clone = wrapper.clone(true);
-
-      clone.position.set(
-        -finalCenter.x,
-        -finalBounds.min.y + CONFIG.mapGroundOffsetY,
-        -finalCenter.z
-      );
-
       segment.add(clone);
       segment.position.set(0, 0, G.pz - i * mapLength);
       scene.add(segment);
@@ -205,7 +215,9 @@ new GLTFLoader().load(
 
     fallbackGround.visible = false;
     mapLoaded = true;
-    console.info(`[mapa] Alinhado! Comprimento: ${mapLength.toFixed(2)}, Escala: ${scaleFactor.toFixed(3)}`);
+    console.info(
+      `[mapa] Pista nivelada! Largura: ${CONFIG.mapTrackWidth}, Comprimento: ${mapLength.toFixed(2)}`
+    );
   },
   undefined,
   (error) => {
