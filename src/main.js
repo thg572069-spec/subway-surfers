@@ -184,6 +184,27 @@ const MAT = {
 
 const UNIT_BOX = new THREE.BoxGeometry(1, 1, 1);
 
+// =====================================================================
+// Luminárias urbanas decorativas
+// =====================================================================
+const lampPostGeo = new THREE.CylinderGeometry(0.075, 0.11, 4.6, 12);
+const lampArmGeo = new THREE.CylinderGeometry(0.055, 0.055, 0.85, 10);
+const lampHeadGeo = new THREE.BoxGeometry(0.48, 0.16, 0.3);
+const lampBaseGeo = new THREE.CylinderGeometry(0.2, 0.24, 0.16, 12);
+
+const lampMetalMat = std({
+  color: 0x354454,
+  metalness: 0.65,
+  roughness: 0.38
+});
+
+const lampAccentMat = std({
+  color: 0x9bdc38,
+  emissive: 0x477b12,
+  emissiveIntensity: 0.7,
+  roughness: 0.35
+});
+
 function box(mat, sx, sy, sz, x = 0, y = 0, z = 0, shadow = true) {
   const m = new THREE.Mesh(UNIT_BOX, mat);
   m.scale.set(sx, sy, sz);
@@ -230,6 +251,34 @@ function makeTile() {
   for (const s of [-1, 1]) {
     g.add(box(MAT.wall, 0.5, 1.4, TILE_LEN, s * wallX, 0.7, 0));
     g.add(box(MAT.wallTop, 0.7, 0.15, TILE_LEN, s * wallX, 1.45, 0));
+  }
+
+  // Postes decorativos nas laterais do cenário
+  for (const side of [-1, 1]) {
+    for (const z of [-12, 12]) {
+      const lamp = new THREE.Group();
+
+      const base = new THREE.Mesh(lampBaseGeo, lampMetalMat);
+      base.position.y = 0.08;
+      lamp.add(base);
+
+      const pole = new THREE.Mesh(lampPostGeo, lampMetalMat);
+      pole.position.y = 2.38;
+      pole.castShadow = true;
+      lamp.add(pole);
+
+      const arm = new THREE.Mesh(lampArmGeo, lampMetalMat);
+      arm.rotation.z = Math.PI / 2;
+      arm.position.set(-side * 0.32, 4.55, 0);
+      lamp.add(arm);
+
+      const head = new THREE.Mesh(lampHeadGeo, lampAccentMat);
+      head.position.set(-side * 0.72, 4.55, 0);
+      lamp.add(head);
+
+      lamp.position.set(side * 5.15, 0, z);
+      g.add(lamp);
+    }
   }
 
   g.userData.buildings = [];
