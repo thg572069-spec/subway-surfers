@@ -15,7 +15,8 @@ const CONFIG = {
   mapTrackWidth: 28.0,          // Largura total do modelo (aumentado para a rua ficar larga)
   mapRotationX: 0,              // Lado certo (sem virar de cabeça para baixo)
   mapRotationY: 0,              // Mude para Math.PI / 2 se o mapa estiver de lado
-  mapGroundOffsetY: 0,          // Ajuste fino se quiser subir/descer o mapa (+ ou -)
+  mapGroundOffsetY: 1.0,          // Ajuste fino vertical do chão (+ sobe o chão, - desce)
+  mapSegmentOverlap: 0.98,        // Fator de junção entre segmentos do loop (ex: 0.95 a 1.0)
 
   // Física e Jogabilidade
   laneWidth: 2.4,
@@ -124,22 +125,30 @@ const fallbackGround = new THREE.Mesh(
 fallbackGround.receiveShadow = true;
 scene.add(fallbackGround);
 
+function getEffectiveStep() {
+  const overlap = clamp(CONFIG.mapSegmentOverlap ?? 1, 0.5, 1.05);
+  return mapLength * overlap;
+}
+
 function updateMapLoop() {
   fallbackGround.position.z = G.pz - 100;
   if (!mapLoaded || mapLength <= 0) return;
 
+  const step = getEffectiveStep();
+
   for (const segment of mapSegments) {
-    if (segment.position.z - mapLength / 2 > G.pz + 15) {
+    if (segment.position.z - step / 2 > G.pz + 15) {
       const furthestBack = Math.min(...mapSegments.map((item) => item.position.z));
-      segment.position.z = furthestBack - mapLength;
+      segment.position.z = furthestBack - step;
     }
   }
 }
 
 function resetMapLoop() {
-  if (!mapLoaded) return;
+  if (!mapLoaded || mapLength <= 0) return;
+  const step = getEffectiveStep();
   mapSegments.forEach((segment, index) => {
-    segment.position.z = G.pz - index * mapLength;
+    segment.position.z = G.pz - index * step;
   });
 }
 
@@ -194,7 +203,7 @@ new GLTFLoader().load(
     const hits = raycaster.intersectObject(wrapper, true);
     const roadSurfaceY = hits.length > 0 ? hits[0].point.y : 0;
 
-    // Nivela o asfalto da pista exatamente em Y = 0
+    // Nivela o asfalto da pista próximo de Y = 0 e aplica o deslocamento manual
     wrapper.position.y -= roadSurfaceY - CONFIG.mapGroundOffsetY;
 
     mapLength = finalSize.z;
@@ -204,11 +213,13 @@ new GLTFLoader().load(
       return;
     }
 
+    const step = getEffectiveStep();
+
     for (let i = 0; i < MAP_SEGMENTS_COUNT; i++) {
       const segment = new THREE.Group();
       const clone = wrapper.clone(true);
       segment.add(clone);
-      segment.position.set(0, 0, G.pz - i * mapLength);
+      segment.position.set(0, 0, G.pz - i * step);
       scene.add(segment);
       mapSegments.push(segment);
     }
@@ -216,7 +227,7 @@ new GLTFLoader().load(
     fallbackGround.visible = false;
     mapLoaded = true;
     console.info(
-      `[mapa] Pista nivelada! Largura: ${CONFIG.mapTrackWidth}, Comprimento: ${mapLength.toFixed(2)}`
+      `[mapa] Pista nivelada! Largura: ${CONFIG.mapTrackWidth}, Comprimento: ${mapLength.toFixed(2)}, Passo: ${step.toFixed(2)}`
     );
   },
   undefined,
