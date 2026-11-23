@@ -210,7 +210,7 @@ function box(mat, sx, sy, sz, x = 0, y = 0, z = 0, shadow = true) {
 }
 
 // =====================================================================
-// World tiles – pista procedural original
+// World tiles – cenário antigo desativado
 // =====================================================================
 const SLEEPERS_PER_LANE = 20;
 const sleeperGeo = new THREE.BoxGeometry(1.9, 0.1, 0.35);
@@ -218,75 +218,10 @@ const groundGeo = new THREE.PlaneGeometry(70, TILE_LEN).rotateX(-Math.PI / 2);
 const tiles = [];
 
 function makeTile() {
+  // O cenário visual agora é fornecido exclusivamente pelo mapa GLB.
+  // Mantemos grupos vazios para preservar o sistema de reciclagem do jogo.
   const g = new THREE.Group();
-  const ground = new THREE.Mesh(groundGeo, MAT.gravel);
-  ground.receiveShadow = true;
-  g.add(ground);
-  g.add(box(MAT.bed, LANE_W * 3 + 0.6, 0.04, TILE_LEN, 0, 0.02, 0, false));
-
-  const sleepers = new THREE.InstancedMesh(sleeperGeo, MAT.sleeper, 3 * SLEEPERS_PER_LANE);
-  const m = new THREE.Matrix4();
-  let i = 0;
-
-  for (let l = 0; l < 3; l++) {
-    g.add(box(MAT.rail, 0.1, 0.14, TILE_LEN, laneX(l) - 0.72, 0.1, 0, false));
-    g.add(box(MAT.rail, 0.1, 0.14, TILE_LEN, laneX(l) + 0.72, 0.1, 0, false));
-
-    for (let k = 0; k < SLEEPERS_PER_LANE; k++) {
-      m.makeTranslation(laneX(l), 0.05, -TILE_LEN / 2 + (k + 0.5) * (TILE_LEN / SLEEPERS_PER_LANE));
-      sleepers.setMatrixAt(i++, m);
-    }
-  }
-
-  sleepers.receiveShadow = true;
-  g.add(sleepers);
-
-  const wallX = LANE_W * 1.5 + 0.9;
-
-  for (const s of [-1, 1]) {
-    g.add(box(MAT.wall, 0.5, 1.4, TILE_LEN, s * wallX, 0.7, 0));
-    g.add(box(MAT.wallTop, 0.7, 0.15, TILE_LEN, s * wallX, 1.45, 0));
-  }
-
-  for (const side of [-1, 1]) {
-    for (const z of [-12, 12]) {
-      const lamp = new THREE.Group();
-
-      const base = new THREE.Mesh(lampBaseGeo, lampMetalMat);
-      base.position.y = 0.08;
-      lamp.add(base);
-
-      const pole = new THREE.Mesh(lampPostGeo, lampMetalMat);
-      pole.position.y = 2.38;
-      pole.castShadow = true;
-      lamp.add(pole);
-
-      const arm = new THREE.Mesh(lampArmGeo, lampMetalMat);
-      arm.rotation.z = Math.PI / 2;
-      arm.position.set(-side * 0.32, 4.55, 0);
-      lamp.add(arm);
-
-      const head = new THREE.Mesh(lampHeadGeo, lampAccentMat);
-      head.position.set(-side * 0.72, 4.55, 0);
-      lamp.add(head);
-
-      lamp.position.set(side * 5.15, 0, z);
-      g.add(lamp);
-    }
-  }
-
   g.userData.buildings = [];
-
-  for (const s of [-1, 1]) {
-    for (let k = 0; k < 4; k++) {
-      const b = box(MAT.buildings[0], 1, 1, 1, 0, 0, 0, false);
-      b.userData = { side: s, slot: k };
-      g.add(b);
-      g.userData.buildings.push(b);
-    }
-  }
-
-  randomizeBuildings(g);
   scene.add(g);
   return g;
 }
