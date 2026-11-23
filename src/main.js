@@ -8,7 +8,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 const CONFIG = {
   // Personagem 3D
   playerModel: 'assets/player.glb',
-  playerModelHeight: 1.8,
+  playerModelHeight: 1.0,
   playerModelRotationY: Math.PI,
 
   // Mapa 3D
