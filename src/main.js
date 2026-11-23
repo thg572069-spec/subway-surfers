@@ -1,3 +1,4 @@
+
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
@@ -12,11 +13,11 @@ const CONFIG = {
 
   // Mapa 3D
   mapModel: 'assets/mapa/mapa.glb',
-  mapTrackWidth: 28.0,          // Largura total do modelo (aumentado para a rua ficar larga)
-  mapRotationX: 0,              // Lado certo (sem virar de cabeça para baixo)
-  mapRotationY: 0,              // Mude para Math.PI / 2 se o mapa estiver de lado
-  mapGroundOffsetY: 1.0,          // Ajuste fino vertical do chão (+ sobe o chão, - desce)
-  mapSegmentOverlap: 0.98,        // Fator de junção entre segmentos do loop (ex: 0.95 a 1.0)
+  mapTrackWidth: 28.0,
+  mapRotationX: 0,
+  mapRotationY: 0,
+  mapGroundOffsetY: 0.0, // Asfalto alinhado com os pés do personagem
+  mapSegmentOverlap: 0.98,
 
   // Física e Jogabilidade
   laneWidth: 2.4,
@@ -174,7 +175,7 @@ new GLTFLoader().load(
     rawModel.rotation.x = CONFIG.mapRotationX;
     rawModel.rotation.y = CONFIG.mapRotationY;
 
-    // Alinha o lado mais comprido do mapa com o eixo Z (direção da corrida)
+    // Alinha o lado mais comprido do mapa com o eixo Z
     const preBounds = new THREE.Box3().setFromObject(wrapper);
     const preSize = preBounds.getSize(new THREE.Vector3());
     if (CONFIG.mapRotationY === 0 && preSize.x > preSize.z) {
@@ -195,7 +196,7 @@ new GLTFLoader().load(
     wrapper.position.set(-finalCenter.x, -finalBounds.min.y, -finalCenter.z);
     wrapper.updateMatrixWorld(true);
 
-    // Detecta automaticamente a altura da superfície da rua no centro (X=0, Z=0)
+    // Detecta automaticamente a altura da superfície da rua
     const raycaster = new THREE.Raycaster(
       new THREE.Vector3(0, finalSize.y + 10, 0),
       new THREE.Vector3(0, -1, 0)
@@ -203,7 +204,7 @@ new GLTFLoader().load(
     const hits = raycaster.intersectObject(wrapper, true);
     const roadSurfaceY = hits.length > 0 ? hits[0].point.y : 0;
 
-    // Nivela o asfalto da pista próximo de Y = 0 e aplica o deslocamento manual
+    // Alinha o asfalto com Y = 0
     wrapper.position.y -= roadSurfaceY - CONFIG.mapGroundOffsetY;
 
     mapLength = finalSize.z;
