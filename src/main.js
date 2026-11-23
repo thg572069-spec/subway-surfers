@@ -1,4 +1,3 @@
-
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
@@ -8,16 +7,16 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 const CONFIG = {
   // Personagem 3D
   playerModel: 'assets/player.glb',
-  playerModelHeight: 1.0,
+  playerModelHeight: 1.75,
   playerModelRotationY: Math.PI,
 
   // Mapa 3D
   mapModel: 'assets/mapa/mapa.glb',
-  mapTrackWidth: 28.0,
+  mapTrackWidth: 95.0, // Compensação da rua transversal (em T) e árvores laterais[span_1](start_span)[span_1](end_span)
   mapRotationX: 0,
   mapRotationY: 0,
-  mapGroundOffsetY: 0.0, // Asfalto alinhado com os pés do personagem
-  mapSegmentOverlap: 0.98,
+  mapGroundOffsetY: 0.0,
+  mapSegmentOverlap: 0.88, // Sobrepõe levemente os trechos para esconder o cruzamento[span_2](start_span)[span_2](end_span)
 
   // Física e Jogabilidade
   laneWidth: 2.4,
@@ -54,23 +53,23 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.15;
+renderer.toneMappingExposure = 1.05;
 
 const SKY = 0x9fd8ff;
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(SKY);
-scene.fog = new THREE.Fog(SKY, 65, 185);
+scene.fog = new THREE.Fog(SKY, 75, 210);
 
-const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 400);
+const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 450);
 camera.position.set(0, 4.3, 7.2);
 
-scene.add(new THREE.HemisphereLight(0xffffff, 0xb8aca0, 2.2));
-scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+scene.add(new THREE.HemisphereLight(0xffffff, 0xb8aca0, 1.2));
+scene.add(new THREE.AmbientLight(0xffffff, 0.45));
 
-const sun = new THREE.DirectionalLight(0xfff4e0, 2.2);
+const sun = new THREE.DirectionalLight(0xfff4e0, 1.5);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
-Object.assign(sun.shadow.camera, { left: -16, right: 16, top: 30, bottom: -30, near: 1, far: 90 });
+Object.assign(sun.shadow.camera, { left: -20, right: 20, top: 35, bottom: -35, near: 1, far: 110 });
 sun.shadow.bias = -0.0005;
 scene.add(sun, sun.target);
 
@@ -114,13 +113,13 @@ function box(mat, sx, sy, sz, x = 0, y = 0, z = 0, shadow = true) {
 // =====================================================================
 // MAPA GLB ÚNICO – ALINHAMENTO AUTOMÁTICO E LOOP CONTÍNUO
 // =====================================================================
-const MAP_SEGMENTS_COUNT = 3;
+const MAP_SEGMENTS_COUNT = 4;
 const mapSegments = [];
 let mapLength = 0;
 let mapLoaded = false;
 
 const fallbackGround = new THREE.Mesh(
-  new THREE.PlaneGeometry(30, 400).rotateX(-Math.PI / 2),
+  new THREE.PlaneGeometry(40, 450).rotateX(-Math.PI / 2),
   std({ color: 0x7a828c, roughness: 0.9 })
 );
 fallbackGround.receiveShadow = true;
@@ -182,7 +181,7 @@ new GLTFLoader().load(
       rawModel.rotation.y = Math.PI / 2;
     }
 
-    // Escala proporcional
+    // Escala proporcional pela largura configurada
     const scaledBounds = new THREE.Box3().setFromObject(wrapper);
     const scaledSize = scaledBounds.getSize(new THREE.Vector3());
     const scaleFactor = CONFIG.mapTrackWidth / (scaledSize.x || 1);
@@ -196,13 +195,23 @@ new GLTFLoader().load(
     wrapper.position.set(-finalCenter.x, -finalBounds.min.y, -finalCenter.z);
     wrapper.updateMatrixWorld(true);
 
-    // Detecta automaticamente a altura da superfície da rua
-    const raycaster = new THREE.Raycaster(
+    // Detecta automaticamente a altura da superfície da rua no centro da pista
+    const raycaster = new THREE.Raycaster();
+    const samplePoints = [
       new THREE.Vector3(0, finalSize.y + 10, 0),
-      new THREE.Vector3(0, -1, 0)
-    );
-    const hits = raycaster.intersectObject(wrapper, true);
-    const roadSurfaceY = hits.length > 0 ? hits[0].point.y : 0;
+      new THREE.Vector3(0, finalSize.y + 10, finalSize.z * 0.25),
+      new THREE.Vector3(0, finalSize.y + 10, -finalSize.z * 0.25),
+    ];
+
+    let roadSurfaceY = 0;
+    for (const origin of samplePoints) {
+      raycaster.set(origin, new THREE.Vector3(0, -1, 0));
+      const hits = raycaster.intersectObject(wrapper, true);
+      if (hits.length > 0) {
+        roadSurfaceY = hits[0].point.y;
+        break;
+      }
+    }
 
     // Alinha o asfalto com Y = 0
     wrapper.position.y -= roadSurfaceY - CONFIG.mapGroundOffsetY;
