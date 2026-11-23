@@ -1,15 +1,23 @@
-
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 // =====================================================================
-// CONFIG – tweak the feel of the game here
+// CONFIG – ajuste o alinhamento do personagem e do mapa aqui
 // =====================================================================
 const CONFIG = {
+  // Personagem 3D
   playerModel: 'assets/player.glb',
   playerModelHeight: 1.8,
   playerModelRotationY: Math.PI,
 
+  // Mapa 3D (Cenário único)
+  mapModel: 'assets/mapa/mapa.glb',
+  mapTrackWidth: 9.0,          // Largura total das 3 pistas no cenário (alinha automaticamente com LANE_W)
+  mapRotationX: 0,             // Mude para Math.PI se o mapa estiver de cabeça para baixo
+  mapRotationY: 0,             // Mude para Math.PI / 2 se o mapa estiver atravessado
+  mapGroundOffsetY: 0,         // Ajuste fino da altura do chão do mapa (ex: -0.2 ou +0.1)
+
+  // Física e Jogabilidade
   laneWidth: 2.4,
   startSpeed: 15,
   maxSpeed: 36,
@@ -21,14 +29,12 @@ const CONFIG = {
 };
 
 // =====================================================================
-// Constants & helpers
+// Constantes & Helpers
 // =====================================================================
 const LANE_W = CONFIG.laneWidth;
 const TRAIN_H = 3.0;
 const TRAIN_W = 2.1;
 const RAMP_LEN = 7;
-const TILE_LEN = 40;
-const NUM_TILES = 6;
 const SPAWN_AHEAD = 170;
 const DESPAWN_BEHIND = 20;
 const PLAYER_HALF_W = 0.32;
@@ -63,7 +69,7 @@ function weighted(weights) {
 }
 
 // =====================================================================
-// Renderer, scene, camera, lights
+// Renderer, Cena, Câmera e Iluminação
 // =====================================================================
 const canvas = document.getElementById('game');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -71,17 +77,21 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
 
 const SKY = 0x9fd8ff;
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(SKY);
-scene.fog = new THREE.Fog(SKY, 55, 170);
+scene.fog = new THREE.Fog(SKY, 60, 180);
 
 const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 400);
 camera.position.set(0, 4.3, 7.2);
 
-scene.add(new THREE.HemisphereLight(0xffffff, 0x8a7a66, 1.7));
-const sun = new THREE.DirectionalLight(0xfff4e0, 2.3);
+// Luz ambiente + Sol direcional para evitar modelos pretos
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8a7a66, 1.8));
+const sun = new THREE.DirectionalLight(0xfff4e0, 2.2);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 Object.assign(sun.shadow.camera, { left: -16, right: 16, top: 30, bottom: -30, near: 1, far: 90 });
@@ -95,9 +105,9 @@ window.addEventListener('resize', () => {
 });
 
 // =====================================================================
-// Procedural textures & materials
+// Materiais dos Obstáculos e Moedas
 // =====================================================================
-function canvasTexture(w, h, draw, rx = 1, ry = 1) {
+function canvasTexture(w, h, draw) {
   const c = document.createElement('canvas');
   c.width = w;
   c.height = h;
@@ -105,7 +115,6 @@ function canvasTexture(w, h, draw, rx = 1, ry = 1) {
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.repeat.set(rx, ry);
   t.anisotropy = 4;
   return t;
 }
@@ -126,38 +135,8 @@ function stripes(colA, colB) {
   });
 }
 
-const gravelTex = canvasTexture(256, 256, (g, w, h) => {
-  g.fillStyle = '#9a8f80';
-  g.fillRect(0, 0, w, h);
-  for (let i = 0; i < 2500; i++) {
-    const v = 110 + Math.random() * 90;
-    g.fillStyle = `rgb(${v},${v - 8},${v - 20})`;
-    g.fillRect(Math.random() * w, Math.random() * h, 2 + Math.random() * 3, 2 + Math.random() * 3);
-  }
-}, 8, 6);
-
-const windowsTex = canvasTexture(128, 256, (g, w, h) => {
-  g.fillStyle = '#ffffff';
-  g.fillRect(0, 0, w, h);
-  for (let y = 12; y < h - 10; y += 28) {
-    for (let x = 10; x < w - 10; x += 30) {
-      g.fillStyle = Math.random() < 0.3 ? '#fff1b8' : '#5d7088';
-      g.fillRect(x, y, 18, 16);
-    }
-  }
-});
-
 const std = (o) => new THREE.MeshStandardMaterial(o);
 const MAT = {
-  gravel: std({ map: gravelTex, roughness: 1 }),
-  bed: std({ color: 0x6b5847, roughness: 1 }),
-  rail: std({ color: 0xc9ced6, metalness: 0.8, roughness: 0.3 }),
-  sleeper: std({ color: 0x5a4030, roughness: 0.9 }),
-  wall: std({ color: 0xb9b3a8, roughness: 0.95 }),
-  wallTop: std({ color: 0x8f8a80, roughness: 0.95 }),
-  buildings: [0xf2c6a0, 0xd98e73, 0xa7c4d9, 0xe8dcc0, 0xc7a6d9, 0x9fd1b5, 0xf0a1a1].map(
-    (c) => std({ color: c, map: windowsTex, roughness: 0.9 })
-  ),
   trains: [0x2f7de1, 0xe24b3b, 0x2bb673, 0xf2a72e, 0x8e5bd6].map((c) =>
     std({ color: c, roughness: 0.45, metalness: 0.25 })
   ),
@@ -179,27 +158,6 @@ const MAT = {
 
 const UNIT_BOX = new THREE.BoxGeometry(1, 1, 1);
 
-// =====================================================================
-// Luminárias urbanas decorativas
-// =====================================================================
-const lampPostGeo = new THREE.CylinderGeometry(0.075, 0.11, 4.6, 12);
-const lampArmGeo = new THREE.CylinderGeometry(0.055, 0.055, 0.85, 10);
-const lampHeadGeo = new THREE.BoxGeometry(0.48, 0.16, 0.3);
-const lampBaseGeo = new THREE.CylinderGeometry(0.2, 0.24, 0.16, 12);
-
-const lampMetalMat = std({
-  color: 0x354454,
-  metalness: 0.65,
-  roughness: 0.38
-});
-
-const lampAccentMat = std({
-  color: 0x9bdc38,
-  emissive: 0x477b12,
-  emissiveIntensity: 0.7,
-  roughness: 0.35
-});
-
 function box(mat, sx, sy, sz, x = 0, y = 0, z = 0, shadow = true) {
   const m = new THREE.Mesh(UNIT_BOX, mat);
   m.scale.set(sx, sy, sz);
@@ -210,53 +168,28 @@ function box(mat, sx, sy, sz, x = 0, y = 0, z = 0, shadow = true) {
 }
 
 // =====================================================================
-// World tiles – cenário antigo desativado
+// MAPA GLB ÚNICO – ALINHAMENTO AUTOMÁTICO E LOOP CONTÍNUO
 // =====================================================================
-const SLEEPERS_PER_LANE = 20;
-const sleeperGeo = new THREE.BoxGeometry(1.9, 0.1, 0.35);
-const groundGeo = new THREE.PlaneGeometry(70, TILE_LEN).rotateX(-Math.PI / 2);
-const tiles = [];
-
-function makeTile() {
-  // O cenário visual agora é fornecido exclusivamente pelo mapa GLB.
-  // Mantemos grupos vazios para preservar o sistema de reciclagem do jogo.
-  const g = new THREE.Group();
-  g.userData.buildings = [];
-  scene.add(g);
-  return g;
-}
-
-function randomizeBuildings(tile) {
-  for (const b of tile.userData.buildings) {
-    const w = rand(6, 11);
-    const h = rand(7, 24);
-    const d = rand(7, 9.5);
-    b.material = pick(MAT.buildings);
-    b.scale.set(w, h, d);
-    b.position.set(b.userData.side * (6.2 + w / 2 + rand(0, 2.5)), h / 2, -TILE_LEN / 2 + b.userData.slot * 10 + 5);
-  }
-}
-
-for (let i = 0; i < NUM_TILES; i++) tiles.push(makeTile());
-
-// =====================================================================
-// MAPA GLB – LOOP CONTÍNUO
-// =====================================================================
-const MAP_PATH = 'assets/mapa/mapa.glb';
 const MAP_SEGMENTS_COUNT = 3;
 const mapSegments = [];
 let mapLength = 0;
 let mapLoaded = false;
 
+// Chão de segurança invisível caso o GLB demore para carregar
+const fallbackGround = new THREE.Mesh(
+  new THREE.PlaneGeometry(30, 400).rotateX(-Math.PI / 2),
+  std({ color: 0x555c66, roughness: 0.9 })
+);
+fallbackGround.receiveShadow = true;
+scene.add(fallbackGround);
+
 function updateMapLoop() {
+  fallbackGround.position.z = G.pz - 100;
   if (!mapLoaded || mapLength <= 0) return;
 
   for (const segment of mapSegments) {
-    if (segment.position.z - mapLength / 2 > G.pz + 8) {
-      const furthestBack = Math.min(
-        ...mapSegments.map((item) => item.position.z)
-      );
-
+    if (segment.position.z - mapLength / 2 > G.pz + 15) {
+      const furthestBack = Math.min(...mapSegments.map((item) => item.position.z));
       segment.position.z = furthestBack - mapLength;
     }
   }
@@ -264,71 +197,91 @@ function updateMapLoop() {
 
 function resetMapLoop() {
   if (!mapLoaded) return;
-
   mapSegments.forEach((segment, index) => {
     segment.position.z = G.pz - index * mapLength;
   });
 }
 
 new GLTFLoader().load(
-  MAP_PATH,
+  CONFIG.mapModel,
   (gltf) => {
-    const source = gltf.scene;
+    const rawModel = gltf.scene;
 
-    source.traverse((obj) => {
+    // 1. Garante materiais iluminados, dois lados visíveis e sombras
+    rawModel.traverse((obj) => {
       if (obj.isMesh) {
         obj.castShadow = true;
         obj.receiveShadow = true;
+        if (obj.material) {
+          obj.material.side = THREE.DoubleSide;
+          // Corrige modelos totalmente pretos por metalness 1 sem environment map
+          if (obj.material.metalness > 0.7) obj.material.metalness = 0.3;
+          obj.material.needsUpdate = true;
+        }
       }
     });
 
-    // Detecta o eixo horizontal mais comprido do modelo.
-    const initialBounds = new THREE.Box3().setFromObject(source);
-    const initialSize = initialBounds.getSize(new THREE.Vector3());
+    // 2. Aplica rotações configuradas
+    const wrapper = new THREE.Group();
+    wrapper.add(rawModel);
+    rawModel.rotation.x = CONFIG.mapRotationX;
+    rawModel.rotation.y = CONFIG.mapRotationY;
 
-    // O jogo avança pelo eixo Z.
-    if (initialSize.x > initialSize.z) {
-      source.rotation.y = Math.PI / 2;
+    // Se o mapa veio atravessado no eixo X e o usuário não forçou rotação Y, alinha com o eixo Z
+    const preBounds = new THREE.Box3().setFromObject(wrapper);
+    const preSize = preBounds.getSize(new THREE.Vector3());
+    if (CONFIG.mapRotationY === 0 && preSize.x > preSize.z) {
+      rawModel.rotation.y = Math.PI / 2;
     }
 
-    const bounds = new THREE.Box3().setFromObject(source);
-    const size = bounds.getSize(new THREE.Vector3());
-    const center = bounds.getCenter(new THREE.Vector3());
+    // 3. Escala proporcional para que a largura da pista bata exatamente com as 3 faixas
+    const scaledBounds = new THREE.Box3().setFromObject(wrapper);
+    const scaledSize = scaledBounds.getSize(new THREE.Vector3());
+    const scaleFactor = CONFIG.mapTrackWidth / (scaledSize.x || 1);
+    wrapper.scale.setScalar(scaleFactor);
 
-    mapLength = size.z;
+    // 4. Calcula bounding box final para centralizar no X e nivelar o chão em Y = 0
+    const finalBounds = new THREE.Box3().setFromObject(wrapper);
+    const finalSize = finalBounds.getSize(new THREE.Vector3());
+    const finalCenter = finalBounds.getCenter(new THREE.Vector3());
+
+    mapLength = finalSize.z;
 
     if (!Number.isFinite(mapLength) || mapLength < 1) {
-      mapLength = 0;
       console.error('[mapa] Comprimento inválido no GLB.');
       return;
     }
 
+    // 5. Cria os segmentos em loop
     for (let i = 0; i < MAP_SEGMENTS_COUNT; i++) {
       const segment = new THREE.Group();
-      const model = source.clone(true);
+      const clone = wrapper.clone(true);
 
-      model.position.set(-center.x, -bounds.min.y, -center.z);
-      segment.add(model);
+      // Centraliza em X/Z e coloca a base do modelo em Y = 0 + offset
+      clone.position.set(
+        -finalCenter.x,
+        -finalBounds.min.y + CONFIG.mapGroundOffsetY,
+        -finalCenter.z
+      );
 
+      segment.add(clone);
       segment.position.set(0, 0, G.pz - i * mapLength);
       scene.add(segment);
       mapSegments.push(segment);
     }
 
+    fallbackGround.visible = false;
     mapLoaded = true;
-
-    console.info(
-      `[mapa] Loop carregado. Comprimento: ${mapLength.toFixed(2)}`
-    );
+    console.info(`[mapa] Alinhado! Comprimento: ${mapLength.toFixed(2)}, Escala: ${scaleFactor.toFixed(3)}`);
   },
   undefined,
   (error) => {
-    console.error(`[mapa] Erro ao carregar ${MAP_PATH}:`, error);
+    console.error(`[mapa] Erro ao carregar ${CONFIG.mapModel}:`, error);
   }
 );
 
 // =====================================================================
-// Obstacles: trains, ramps, barriers
+// Obstáculos: Trens, Rampas, Barreiras e Moedas
 // =====================================================================
 const rampShape = new THREE.Shape();
 rampShape.moveTo(0, 0);
@@ -357,7 +310,6 @@ function makeTrain(L, withRamp, moving) {
   g.add(box(MAT.trainDark, TRAIN_W - 0.4, 0.05, L - 0.4, 0, TRAIN_H + 0.02, -L / 2, false));
 
   const lightMat = moving ? MAT.headlightHot : MAT.headlight;
-
   for (const s of [-1, 1]) {
     g.add(box(lightMat, 0.32, 0.22, 0.05, s * 0.65, 0.9, 0.02, false));
   }
@@ -374,33 +326,27 @@ function makeTrain(L, withRamp, moving) {
 
 function makeLowBarrier() {
   const g = new THREE.Group();
-
   for (const s of [-1, 1]) {
     g.add(box(MAT.post, 0.12, 1.0, 0.12, s * 0.95, 0.5, 0));
   }
-
   g.add(box(MAT.stripeRW, 2.0, 0.42, 0.12, 0, 0.78, 0));
   g.add(box(MAT.post, 2.0, 0.1, 0.1, 0, 0.25, 0));
-
   return g;
 }
 
 function makeHighBarrier() {
   const g = new THREE.Group();
-
   for (const s of [-1, 1]) {
     g.add(box(MAT.post, 0.14, 2.9, 0.14, s * 1.05, 1.45, 0));
   }
-
   g.add(box(MAT.stripeYB, 2.0, 1.35, 0.1, 0, 2.05, 0));
-
   return g;
 }
 
 const coinGeo = new THREE.CylinderGeometry(0.38, 0.38, 0.09, 24).rotateX(Math.PI / 2);
 
 // =====================================================================
-// Player
+// Personagem 3D (Alinhado ao chão Y = 0 e centralizado nas faixas)
 // =====================================================================
 function makeRunner() {
   const root = new THREE.Group();
@@ -429,13 +375,10 @@ function makeRunner() {
   legR.add(box(MAT.shoe, 0.28, 0.14, 0.38, 0, -0.78, -0.05));
 
   scene.add(root);
-
   return { root, body, armL, armR, legL, legR };
 }
 
 const runner = makeRunner();
-
-// Optional GLB character
 let glb = null;
 
 if (CONFIG.playerModel) {
@@ -451,32 +394,28 @@ if (CONFIG.playerModel) {
         }
       });
 
-      const inner = new THREE.Group();
-      inner.add(model);
+      // Normaliza escala pela altura desejada
+      const rawBox = new THREE.Box3().setFromObject(model);
+      const rawSize = rawBox.getSize(new THREE.Vector3());
+      const scale = CONFIG.playerModelHeight / (rawSize.y || 1);
+      model.scale.setScalar(scale);
 
-      let bb = new THREE.Box3().setFromObject(model);
-      const size = bb.getSize(new THREE.Vector3());
-
-      model.scale.setScalar(CONFIG.playerModelHeight / (size.y || 1));
-
-      bb = new THREE.Box3().setFromObject(model);
-      const c = bb.getCenter(new THREE.Vector3());
-
-      model.position.set(-c.x, -bb.min.y, -c.z);
+      // Recalcula caixa após escala para apoiar os pés exatamente em Y = 0 e centralizar X/Z
+      const scaledBox = new THREE.Box3().setFromObject(model);
+      const center = scaledBox.getCenter(new THREE.Vector3());
+      model.position.set(-center.x, -scaledBox.min.y, -center.z);
 
       const pivot = new THREE.Group();
-      pivot.add(inner);
-      inner.rotation.y = CONFIG.playerModelRotationY;
+      pivot.add(model);
+      pivot.rotation.y = CONFIG.playerModelRotationY;
 
       runner.root.add(pivot);
       runner.body.visible = false;
 
       const mixer = new THREE.AnimationMixer(model);
       const clips = gltf.animations || [];
-
-      const find = (...names) => clips.find((cl) =>
-        names.some((n) => cl.name.toLowerCase().includes(n))
-      );
+      const find = (...names) =>
+        clips.find((cl) => names.some((n) => cl.name.toLowerCase().includes(n)));
 
       const actions = {};
       const runClip = find('run', 'sprint', 'jog', 'walk') || clips[0];
@@ -490,30 +429,24 @@ if (CONFIG.playerModel) {
       if (actions.run) actions.run.play();
 
       glb = { pivot, mixer, actions, current: actions.run || null };
-
-      console.info(`[runner] Loaded ${CONFIG.playerModel} with clips:`, clips.map((cl) => cl.name));
+      console.info(`[runner] Modelo 3D alinhado (${CONFIG.playerModelHeight}m).`);
     },
     undefined,
-    () => console.info(`[runner] No model at ${CONFIG.playerModel} – using the built-in runner.`)
+    () => console.info(`[runner] Modelo não encontrado – usando personagem padrão.`)
   );
 }
 
 function playGlbAction(name) {
   if (!glb) return;
-
   const next = glb.actions[name] || glb.actions.run;
-
   if (!next || next === glb.current) return;
-
   next.reset().fadeIn(0.12).play();
-
   if (glb.current) glb.current.fadeOut(0.12);
-
   glb.current = next;
 }
 
 // =====================================================================
-// Audio
+// Áudio
 // =====================================================================
 let actx = null;
 
@@ -528,28 +461,21 @@ function ensureAudio() {
 
 function beep(freq, dur = 0.08, type = 'square', vol = 0.04, slide = 1) {
   if (!actx) return;
-
   const t = actx.currentTime;
   const o = actx.createOscillator();
   const g = actx.createGain();
-
   o.type = type;
   o.frequency.setValueAtTime(freq, t);
-
-  if (slide !== 1) {
-    o.frequency.exponentialRampToValueAtTime(freq * slide, t + dur);
-  }
-
+  if (slide !== 1) o.frequency.exponentialRampToValueAtTime(freq * slide, t + dur);
   g.gain.setValueAtTime(vol, t);
   g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-
   o.connect(g).connect(actx.destination);
   o.start(t);
   o.stop(t + dur + 0.02);
 }
 
 // =====================================================================
-// Game state
+// Estado do Jogo & UI
 // =====================================================================
 const ui = {
   score: document.getElementById('score-hud'),
@@ -576,9 +502,7 @@ function loadBest() {
 function saveBest(v) {
   try {
     localStorage.setItem('subwayRushBest', String(v));
-  } catch {
-    // Keep best in memory only.
-  }
+  } catch {}
 }
 
 const G = {
@@ -603,7 +527,7 @@ const G = {
 const obstacles = [];
 const coins = [];
 
-ui.best.textContent = `BEST ${G.best}`;
+if (ui.best) ui.best.textContent = `BEST ${G.best}`;
 
 function resetGame() {
   for (const o of obstacles) scene.remove(o.mesh);
@@ -621,11 +545,6 @@ function resetGame() {
 
   resetMapLoop();
 
-  tiles.forEach((t, i) => {
-    t.position.z = TILE_LEN - i * TILE_LEN;
-    randomizeBuildings(t);
-  });
-
   runner.root.rotation.set(0, 0, 0);
   runner.root.position.set(0, 0, 0);
   runner.body.scale.set(1, 1, 1);
@@ -640,8 +559,8 @@ function startGame() {
   ensureAudio();
   resetGame();
   G.state = 'playing';
-  ui.menu.classList.add('hidden');
-  ui.over.classList.add('hidden');
+  if (ui.menu) ui.menu.classList.add('hidden');
+  if (ui.over) ui.over.classList.add('hidden');
   beep(520, 0.1, 'square', 0.04, 1.5);
 }
 
@@ -650,24 +569,23 @@ function gameOver() {
   G.overAt = performance.now();
 
   const isBest = G.score > G.best;
-
   if (isBest) {
     G.best = G.score;
     saveBest(G.best);
   }
 
-  ui.finalScore.textContent = G.score;
-  ui.finalCoins.textContent = G.coins;
-  ui.finalBest.textContent = G.best;
-  ui.best.textContent = `BEST ${G.best}`;
-  ui.newBest.classList.toggle('hidden', !isBest);
-  ui.over.classList.remove('hidden');
+  if (ui.finalScore) ui.finalScore.textContent = G.score;
+  if (ui.finalCoins) ui.finalCoins.textContent = G.coins;
+  if (ui.finalBest) ui.finalBest.textContent = G.best;
+  if (ui.best) ui.best.textContent = `BEST ${G.best}`;
+  if (ui.newBest) ui.newBest.classList.toggle('hidden', !isBest);
+  if (ui.over) ui.over.classList.remove('hidden');
 }
 
 function flash(opacity = 0.45) {
+  if (!ui.flash) return;
   ui.flash.style.transition = 'none';
   ui.flash.style.opacity = opacity;
-
   requestAnimationFrame(() => {
     ui.flash.style.transition = 'opacity .35s';
     ui.flash.style.opacity = 0;
@@ -676,11 +594,9 @@ function flash(opacity = 0.45) {
 
 function crash() {
   if (G.state !== 'playing') return;
-
   G.state = 'crashed';
   G.crashTimer = 0.9;
   G.shake = 0.6;
-
   flash(0.55);
   beep(160, 0.45, 'sawtooth', 0.07, 0.35);
 }
@@ -690,16 +606,14 @@ function stumble() {
     crash();
     return;
   }
-
   G.stumbleTimer = 3.5;
   G.shake = 0.35;
-
   flash(0.3);
   beep(220, 0.2, 'triangle', 0.06, 0.6);
 }
 
 // =====================================================================
-// Spawning
+// Spawning de Obstáculos e Moedas
 // =====================================================================
 function addCoin(x, y, z) {
   const mesh = new THREE.Mesh(coinGeo, MAT.coin);
@@ -726,7 +640,6 @@ function spawnObstacle(type, lane, z) {
       hard: false,
       mesh: makeLowBarrier()
     };
-
     o.mesh.position.set(x, 0, z);
 
   } else if (type === 'high') {
@@ -737,7 +650,6 @@ function spawnObstacle(type, lane, z) {
       hard: false,
       mesh: makeHighBarrier()
     };
-
     o.mesh.position.set(x, 0, z);
 
   } else {
@@ -756,7 +668,6 @@ function spawnObstacle(type, lane, z) {
       hard: !ramp,
       mesh: makeTrain(L, ramp, moving),
     };
-
     o.mesh.position.set(x, 0, front);
 
     if (moving) {
@@ -804,7 +715,6 @@ function spawnRow(z) {
     });
 
     if (type === 'train' || type === 'moving') hardCount++;
-
     placed.push(spawnObstacle(type, lane, z));
   }
 
@@ -815,10 +725,8 @@ function placeCoins(z, placed, free) {
   if (Math.random() < 0.2) return;
 
   const options = [];
-
   for (let l = 0; l < 3; l++) {
     const o = placed.find((p) => p.lane === l);
-
     if (!o) {
       if (free[l]) options.push({ l, kind: 'line' });
     } else if (o.type === 'low') {
@@ -837,21 +745,17 @@ function placeCoins(z, placed, free) {
 
   if (kind === 'line') {
     for (let i = 0; i < 7; i++) addCoin(x, 1.0, z + 3 - i * 2.2);
-
   } else if (kind === 'arc') {
     for (let i = 0; i < 7; i++) {
       const dz = (i - 3) * 1.6;
       addCoin(x, 1.0 + 1.3 * (1 - (dz / 4.8) ** 2), z + dz);
     }
-
   } else if (kind === 'under') {
     for (let i = 0; i < 5; i++) addCoin(x, 0.55, z + 4 - i * 2);
-
   } else if (kind === 'ramp') {
     for (const u of [5.6, 4, 2.4, 0.8]) {
       addCoin(x, TRAIN_H * (1 - u / RAMP_LEN) + 1, o.zMax + u);
     }
-
     for (let zz = o.zMax - 1.5; zz > o.zMin + 1; zz -= 2.4) {
       addCoin(x, TRAIN_H + 1, zz);
     }
@@ -866,11 +770,10 @@ function spawnAhead() {
 }
 
 // =====================================================================
-// Physics helpers
+// Física e Colisões
 // =====================================================================
 function groundAt(px, pz, py) {
   let g = 0;
-
   for (const o of obstacles) {
     if (!o.train || Math.abs(px - o.x) > o.w / 2) continue;
 
@@ -880,15 +783,12 @@ function groundAt(px, pz, py) {
 
     if (o.ramp) {
       const u = pz - o.zMax;
-
       if (u >= 0 && u <= RAMP_LEN) {
         const h = o.walkTop * (1 - u / RAMP_LEN);
-
         if (py >= h - 0.7) g = Math.max(g, h);
       }
     }
   }
-
   return g;
 }
 
@@ -904,53 +804,41 @@ function overlaps(o, px, py, pz, h) {
 }
 
 // =====================================================================
-// Input
+// Controles (Teclado & Touch)
 // =====================================================================
 function move(dir) {
   if (G.state !== 'playing') return;
-
   const nl = clamp(G.lane + dir, 0, 2);
-
   if (nl === G.lane) return;
-
   G.prevLane = G.lane;
   G.lane = nl;
-
   beep(380, 0.05, 'triangle', 0.03);
 }
 
 function jump() {
   if (G.state !== 'playing' || !G.grounded) return;
-
   G.vy = CONFIG.jumpVelocity;
   G.grounded = false;
   G.rollTimer = 0;
-
   beep(440, 0.12, 'square', 0.035, 1.8);
 }
 
 function roll() {
   if (G.state !== 'playing') return;
-
   if (!G.grounded) G.vy = -28;
-
   G.rollTimer = CONFIG.rollDuration;
-
   beep(300, 0.12, 'triangle', 0.04, 0.5);
 }
 
 window.addEventListener('keydown', (e) => {
   const k = e.code;
-
   if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Space'].includes(k)) {
     e.preventDefault();
   }
-
   if (G.state === 'menu' || (G.state === 'over' && performance.now() - G.overAt > 400)) {
     if (k === 'Enter' || k === 'Space') startGame();
     return;
   }
-
   if (k === 'ArrowLeft' || k === 'KeyA') move(-1);
   else if (k === 'ArrowRight' || k === 'KeyD') move(1);
   else if (k === 'ArrowUp' || k === 'KeyW' || k === 'Space') jump();
@@ -958,44 +846,35 @@ window.addEventListener('keydown', (e) => {
 });
 
 let gesture = null;
-
 window.addEventListener('pointerdown', (e) => {
   ensureAudio();
   gesture = { x: e.clientX, y: e.clientY };
 });
-
 window.addEventListener('pointermove', (e) => {
   if (!gesture || G.state !== 'playing') return;
-
   const dx = e.clientX - gesture.x;
   const dy = e.clientY - gesture.y;
-
   if (Math.max(Math.abs(dx), Math.abs(dy)) < 30) return;
-
   gesture = null;
-
   if (Math.abs(dx) > Math.abs(dy)) move(Math.sign(dx));
   else if (dy < 0) jump();
   else roll();
 });
-
 window.addEventListener('pointerup', () => (gesture = null));
 window.addEventListener('pointercancel', () => (gesture = null));
 
-ui.menu.addEventListener('click', startGame);
-
-ui.over.addEventListener('click', () => {
+if (ui.menu) ui.menu.addEventListener('click', startGame);
+if (ui.over) ui.over.addEventListener('click', () => {
   if (performance.now() - G.overAt > 400) startGame();
 });
 
 // =====================================================================
-// Update
+// Loop de Atualização
 // =====================================================================
 const tmpLook = new THREE.Vector3();
 
 function updatePlaying(dt) {
   G.speed = Math.min(CONFIG.maxSpeed, G.speed + CONFIG.acceleration * dt);
-
   const prevPz = G.pz;
 
   G.pz -= G.speed * dt;
@@ -1003,10 +882,8 @@ function updatePlaying(dt) {
   G.rollTimer = Math.max(0, G.rollTimer - dt);
   G.stumbleTimer = Math.max(0, G.stumbleTimer - dt);
 
-  // moving trains
   for (const o of obstacles) {
     o.prevZMax = o.zMax;
-
     if (o.vz) {
       const d = o.vz * dt;
       o.zMax += d;
@@ -1015,13 +892,10 @@ function updatePlaying(dt) {
     }
   }
 
-  // vertical physics
   const g = groundAt(G.px, G.pz, G.py);
-
   if (G.vy > 0 || G.py > g + 0.02) {
     G.vy -= CONFIG.gravity * dt;
     G.py += G.vy * dt;
-
     if (G.py <= g) {
       G.py = g;
       G.vy = 0;
@@ -1035,14 +909,10 @@ function updatePlaying(dt) {
     G.grounded = true;
   }
 
-  // collisions
   const h = G.rollTimer > 0 ? ROLL_H : STAND_H;
-
   for (const o of obstacles) {
     if (!overlaps(o, G.px, G.py, G.pz, h)) continue;
-
     const wasInFront = prevPz - PLAYER_HALF_D >= o.prevZMax - 0.25;
-
     if (o.train && !wasInFront) {
       const side = Math.sign(G.px - o.x) || 1;
       G.px = o.x + side * (o.w / 2 + PLAYER_HALF_W + 0.02);
@@ -1051,16 +921,12 @@ function updatePlaying(dt) {
     } else {
       crash();
     }
-
     if (G.state !== 'playing') return;
   }
 
-  // coins
   for (const c of coins) {
     if (c.taken) continue;
-
     const p = c.mesh.position;
-
     if (
       Math.abs(p.x - G.px) < 0.85 &&
       Math.abs(p.z - G.pz) < 0.9 &&
@@ -1069,29 +935,17 @@ function updatePlaying(dt) {
       c.taken = true;
       c.mesh.visible = false;
       G.coins++;
-
       beep(1320, 0.07, 'square', 0.025, 1.3);
     }
   }
 
   G.score = Math.floor(-G.pz);
-
   spawnAhead();
   recycle();
 }
 
 function recycle() {
-  const camZ = G.pz + 8;
-
-  // Atualiza o loop do mapa GLB.
   updateMapLoop();
-
-  for (const t of tiles) {
-    if (t.position.z - TILE_LEN / 2 > camZ) {
-      t.position.z -= NUM_TILES * TILE_LEN;
-      randomizeBuildings(t);
-    }
-  }
 
   for (let i = obstacles.length - 1; i >= 0; i--) {
     if (obstacles[i].zMin > G.pz + DESPAWN_BEHIND) {
@@ -1108,7 +962,7 @@ function recycle() {
   }
 }
 
-function animateRunner(dt, t) {
+function animateRunner(dt) {
   const r = runner;
   r.root.position.set(G.px, G.py, G.pz);
 
@@ -1117,39 +971,26 @@ function animateRunner(dt, t) {
 
   if (G.state === 'crashed' || G.state === 'over') {
     r.root.rotation.x += (1.25 - r.root.rotation.x) * damp(6, dt);
-
     if (glb) glb.mixer.update(0);
-
     return;
   }
 
   r.root.rotation.z = clamp((G.px - laneX(G.lane)) * 0.12, -0.35, 0.35);
-
-  if (G.state === 'menu') {
-    G.phase += dt * 3;
-  } else {
-    G.phase += dt * (6 + G.speed * 0.6);
-  }
-
+  G.phase += dt * (G.state === 'menu' ? 3 : 6 + G.speed * 0.6);
   const s = Math.sin(G.phase);
 
-  // built-in runner pose
   if (rolling) {
     r.body.scale.y += (0.5 - r.body.scale.y) * k;
     r.legL.rotation.x = r.legR.rotation.x = -1.4;
     r.armL.rotation.x = r.armR.rotation.x = -2.2;
-
   } else if (!G.grounded) {
     r.body.scale.y += (1 - r.body.scale.y) * k;
     r.legL.rotation.x = -1.0;
     r.legR.rotation.x = 0.5;
     r.armL.rotation.x = r.armR.rotation.x = -2.6;
-
   } else {
     r.body.scale.y += (1 - r.body.scale.y) * k;
-
     const amp = G.state === 'menu' ? 0.15 : 0.95;
-
     r.legL.rotation.x = s * amp;
     r.legR.rotation.x = -s * amp;
     r.armL.rotation.x = -s * amp * 0.9;
@@ -1158,10 +999,8 @@ function animateRunner(dt, t) {
 
   r.body.position.y = G.grounded && !rolling ? Math.abs(s) * 0.07 : 0;
 
-  // GLB character
   if (glb) {
     const want = rolling ? 'roll' : !G.grounded ? 'jump' : 'run';
-
     playGlbAction(want);
 
     if (glb.actions.run) {
@@ -1169,20 +1008,17 @@ function animateRunner(dt, t) {
     }
 
     const sy = rolling && !glb.actions.roll ? 0.55 : 1;
-
     glb.pivot.scale.y += (sy - glb.pivot.scale.y) * k;
-
     glb.mixer.update(dt);
   }
 }
 
-function updateCamera(dt, t) {
+function updateCamera(dt) {
   const tx = G.px * 0.8;
   const ty = 4.3 + G.py * 0.6;
 
   camera.position.x += (tx - camera.position.x) * damp(8, dt);
   camera.position.y += (ty - camera.position.y) * damp(6, dt);
-
   camera.position.z = G.pz + 7.2;
 
   if (G.shake > 0) {
@@ -1192,7 +1028,6 @@ function updateCamera(dt, t) {
   }
 
   tmpLook.set(G.px * 0.85, 1.4 + G.py * 0.5, G.pz - 8);
-
   camera.lookAt(tmpLook);
 
   const portraitBoost = camera.aspect < 1 ? (1 - camera.aspect) * 30 : 0;
@@ -1211,23 +1046,20 @@ let lastScore = -1;
 let lastCoins = -1;
 
 function updateHud() {
-  if (G.score !== lastScore) ui.score.textContent = (lastScore = G.score);
-  if (G.coins !== lastCoins) ui.coins.textContent = (lastCoins = G.coins);
+  if (ui.score && G.score !== lastScore) ui.score.textContent = (lastScore = G.score);
+  if (ui.coins && G.coins !== lastCoins) ui.coins.textContent = (lastCoins = G.coins);
 }
 
 const timer = new THREE.Timer();
 
 function frame(timestamp) {
   timer.update(timestamp);
-
   const dt = Math.min(timer.getDelta(), 0.05);
-  const t = timer.getElapsed();
 
   if (G.state === 'playing') {
     updatePlaying(dt);
   } else if (G.state === 'crashed') {
     G.crashTimer -= dt;
-
     if (G.crashTimer <= 0) gameOver();
   }
 
@@ -1235,18 +1067,16 @@ function frame(timestamp) {
     if (!c.taken) c.mesh.rotation.y += dt * 3;
   }
 
-  animateRunner(dt, t);
-  updateCamera(dt, t);
+  animateRunner(dt);
+  updateCamera(dt);
   updateHud();
 
   renderer.render(scene, camera);
-
   requestAnimationFrame(frame);
 }
 
 resetGame();
-ui.loading.remove();
+if (ui.loading) ui.loading.remove();
 requestAnimationFrame(frame);
 
-// Small debug handle
 window.__game = { G, obstacles, coins, start: startGame, move, jump, roll, CONFIG };
